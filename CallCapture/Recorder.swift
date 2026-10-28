@@ -25,6 +25,7 @@ final class Recorder {
 
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var systemAudio: SystemAudioCapture?
+    @ObservationIgnored private var microphone: MicrophoneCapture?
 
     static let recordingsFolder = URL.documentsDirectory.appending(path: "CallCaptures", directoryHint: .isDirectory)
 
@@ -55,6 +56,10 @@ final class Recorder {
 
     func stopRecording() async {
         stopTimer()
+        if let microphone {
+            self.microphone = nil
+            microphone.stop()
+        }
         if let systemAudio {
             self.systemAudio = nil
             await systemAudio.stop()
@@ -72,14 +77,28 @@ final class Recorder {
     private func beginCapture() async {
         var folder: URL?
         do {
+            // Check the mic first so a denial fails before anything starts.
+            guard await MicrophoneCapture.requestPermission() else {
+                throw MicrophoneCapture.CaptureError.permissionDenied
+            }
             let callFolder = try Self.makeCallFolder()
             folder = callFolder
-            // Milestone 3: start the mic track (me.wav) alongside this one.
-            let capture = SystemAudioCapture(fileURL: callFolder.appending(path: "them.wav")) { [weak self] error in
+            let systemAudio = SystemAudioCapture(fileURL: callFolder.appending(path: "them.wav")) { [weak self] error in
                 self?.captureFailed(error)
             }
-            try await capture.start()
-            systemAudio = capture
+            let microphone = MicrophoneCapture(fileURL: callFolder.appending(path: "me.wav")) { [weak self] error in
+                self?.captureFailed(error)
+            }
+            // System audio is slower to start, so the mic starts right after it.
+            try await systemAudio.start()
+            do {
+                try microphone.start()
+            } catch {
+                await systemAudio.stop()
+                throw error
+            }
+            self.systemAudio = systemAudio
+            self.microphone = microphone
             state = .recording
             startDate = Date()
             elapsed = 0
@@ -91,7 +110,7 @@ final class Recorder {
     }
 
     private func captureFailed(_ error: Error) {
-        guard systemAudio != nil else { return }
+        guard systemAudio != nil || microphone != nil else { return }
         Task { await stopRecording() }
         state = .failed(Self.describe(error))
     }
