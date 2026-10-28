@@ -21,12 +21,21 @@ struct CallCaptureApp: App {
             Button(recorder.isRecording ? "Stop Recording" : "Start Recording") {
                 recorder.toggle()
             }
+            .disabled(recorder.state == .starting)
+
+            Divider()
+
+            Button("Open Recordings Folder") {
+                recorder.openRecordingsFolder()
+            }
 
             Divider()
 
             Button("Quit CallCapture") {
-                recorder.stopRecording()
-                NSApplication.shared.terminate(nil)
+                Task {
+                    await recorder.stopRecording()
+                    NSApplication.shared.terminate(nil)
+                }
             }
             .keyboardShortcut("q")
         } label: {

@@ -3,44 +3,123 @@
 //  CallCapture
 //
 
+import AppKit
 import Foundation
 import Observation
+import ScreenCaptureKit
 
 /// Owns recording state. Every recording starts through `startRecording()`,
 /// so a consent gate can later sit in front of that one call.
 @Observable
 final class Recorder {
-    private(set) var isRecording = false
+    enum State: Equatable {
+        case idle
+        case starting
+        case recording
+        case failed(String)
+    }
+
+    private(set) var state: State = .idle
     private(set) var startDate: Date?
     private(set) var elapsed: TimeInterval = 0
 
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var systemAudio: SystemAudioCapture?
+
+    static let recordingsFolder = URL.documentsDirectory.appending(path: "CallCaptures", directoryHint: .isDirectory)
+
+    var isRecording: Bool { state == .recording }
 
     var statusText: String {
-        isRecording ? "Recording \(Self.format(elapsed))" : "Idle"
+        switch state {
+        case .idle: "Idle"
+        case .starting: "Starting…"
+        case .recording: "Recording \(Self.format(elapsed))"
+        case .failed(let message): "Error: \(message)"
+        }
     }
 
     func toggle() {
-        isRecording ? stopRecording() : startRecording()
+        switch state {
+        case .recording: Task { await stopRecording() }
+        case .starting: break
+        case .idle, .failed: startRecording()
+        }
     }
 
     func startRecording() {
-        guard !isRecording else { return }
-        // Milestones 2–3: begin both capture streams (system audio + mic) here.
-        isRecording = true
-        startDate = Date()
-        elapsed = 0
-        startTimer()
+        guard state != .starting, state != .recording else { return }
+        state = .starting
+        Task { await beginCapture() }
     }
 
-    func stopRecording() {
-        guard isRecording else { return }
-        // Milestones 2–3: stop both capture streams and finalize files here.
-        timer?.invalidate()
-        timer = nil
-        isRecording = false
-        startDate = nil
-        elapsed = 0
+    func stopRecording() async {
+        stopTimer()
+        if let systemAudio {
+            self.systemAudio = nil
+            await systemAudio.stop()
+        }
+        if state == .recording { state = .idle }
+    }
+
+    func openRecordingsFolder() {
+        try? FileManager.default.createDirectory(at: Self.recordingsFolder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(Self.recordingsFolder)
+    }
+
+    // MARK: - Private
+
+    private func beginCapture() async {
+        var folder: URL?
+        do {
+            let callFolder = try Self.makeCallFolder()
+            folder = callFolder
+            // Milestone 3: start the mic track (me.wav) alongside this one.
+            let capture = SystemAudioCapture(fileURL: callFolder.appending(path: "them.wav")) { [weak self] error in
+                self?.captureFailed(error)
+            }
+            try await capture.start()
+            systemAudio = capture
+            state = .recording
+            startDate = Date()
+            elapsed = 0
+            startTimer()
+        } catch {
+            if let folder { try? FileManager.default.removeItem(at: folder) }
+            state = .failed(Self.describe(error))
+        }
+    }
+
+    private func captureFailed(_ error: Error) {
+        guard systemAudio != nil else { return }
+        Task { await stopRecording() }
+        state = .failed(Self.describe(error))
+    }
+
+    /// Creates ~/Documents/CallCaptures/<yyyy-MM-dd_HHmm>, adding a suffix if that minute is taken.
+    private static func makeCallFolder() throws -> URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd_HHmm"
+        let base = formatter.string(from: Date())
+
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: recordingsFolder, withIntermediateDirectories: true)
+        var folder = recordingsFolder.appending(path: base, directoryHint: .isDirectory)
+        var suffix = 2
+        while fileManager.fileExists(atPath: folder.path(percentEncoded: false)) {
+            folder = recordingsFolder.appending(path: "\(base)-\(suffix)", directoryHint: .isDirectory)
+            suffix += 1
+        }
+        try fileManager.createDirectory(at: folder, withIntermediateDirectories: false)
+        return folder
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let error = error as? SCStreamError, error.code == .userDeclined {
+            return "Screen & System Audio Recording permission denied"
+        }
+        return error.localizedDescription
     }
 
     private func startTimer() {
@@ -53,6 +132,13 @@ final class Recorder {
         // .common keeps the timer firing while the menu is open.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+    }
+
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+        startDate = nil
+        elapsed = 0
     }
 
     static func format(_ interval: TimeInterval) -> String {
