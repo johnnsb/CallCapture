@@ -10,33 +10,51 @@ import ScreenCaptureKit
 
 /// Owns recording state. Every recording starts through `startRecording()`,
 /// so a consent gate can later sit in front of that one call.
+///
+/// Transcription runs separately: each stopped recording joins a queue that is
+/// transcribed in the background, so a new recording can start at any time.
 @Observable
 final class Recorder {
     enum State: Equatable {
         case idle
         case starting
         case recording
-        case failed(String)
     }
 
     private(set) var state: State = .idle
     private(set) var startDate: Date?
     private(set) var elapsed: TimeInterval = 0
+    private(set) var errorMessage: String?
+    private(set) var transcriptionPhase: Transcriber.Phase?
+    private(set) var lastTranscriptURL: URL?
 
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var systemAudio: SystemAudioCapture?
     @ObservationIgnored private var microphone: MicrophoneCapture?
+    @ObservationIgnored private var currentFolder: URL?
+    @ObservationIgnored private var pendingTranscriptions: [URL] = []
+    @ObservationIgnored private var isTranscribing = false
 
     static let recordingsFolder = URL.documentsDirectory.appending(path: "CallCaptures", directoryHint: .isDirectory)
+
+    init() {
+        lastTranscriptURL = Self.findLastTranscript()
+    }
 
     var isRecording: Bool { state == .recording }
 
     var statusText: String {
+        let transcription = transcriptionPhase.map { Self.describe($0) }
         switch state {
-        case .idle: "Idle"
-        case .starting: "Starting…"
-        case .recording: "Recording \(Self.format(elapsed))"
-        case .failed(let message): "Error: \(message)"
+        case .starting:
+            return "Starting…"
+        case .recording:
+            let recording = "Recording \(Self.format(elapsed))"
+            return transcription.map { "\(recording) · \($0)" } ?? recording
+        case .idle:
+            if let transcription { return transcription }
+            if let errorMessage { return "Error: \(errorMessage)" }
+            return "Idle"
         }
     }
 
@@ -44,17 +62,22 @@ final class Recorder {
         switch state {
         case .recording: Task { await stopRecording() }
         case .starting: break
-        case .idle, .failed: startRecording()
+        case .idle: startRecording()
         }
     }
 
     func startRecording() {
-        guard state != .starting, state != .recording else { return }
+        guard state == .idle else { return }
         state = .starting
+        errorMessage = nil
         Task { await beginCapture() }
     }
 
-    func stopRecording() async {
+    /// Stops both tracks and closes their files, then queues the call for
+    /// transcription unless `transcribe` is false.
+    func stopRecording(transcribe: Bool = true) async {
+        guard let folder = currentFolder else { return }
+        currentFolder = nil
         stopTimer()
         if let microphone {
             self.microphone = nil
@@ -64,7 +87,8 @@ final class Recorder {
             self.systemAudio = nil
             await systemAudio.stop()
         }
-        if state == .recording { state = .idle }
+        state = .idle
+        if transcribe { enqueueTranscription(of: folder) }
     }
 
     func openRecordingsFolder() {
@@ -72,7 +96,16 @@ final class Recorder {
         NSWorkspace.shared.open(Self.recordingsFolder)
     }
 
-    // MARK: - Private
+    func openLastTranscript() {
+        if let url = lastTranscriptURL, FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
+            NSWorkspace.shared.open(url)
+        } else {
+            lastTranscriptURL = Self.findLastTranscript()
+            if let lastTranscriptURL { NSWorkspace.shared.open(lastTranscriptURL) }
+        }
+    }
+
+    // MARK: - Capture
 
     private func beginCapture() async {
         var folder: URL?
@@ -99,21 +132,74 @@ final class Recorder {
             }
             self.systemAudio = systemAudio
             self.microphone = microphone
+            currentFolder = callFolder
             state = .recording
             startDate = Date()
             elapsed = 0
             startTimer()
         } catch {
             if let folder { try? FileManager.default.removeItem(at: folder) }
-            state = .failed(Self.describe(error))
+            state = .idle
+            errorMessage = Self.describe(error)
         }
     }
 
+    /// A track failed mid-call: stop both, keep what was recorded, and still transcribe it.
     private func captureFailed(_ error: Error) {
-        guard systemAudio != nil || microphone != nil else { return }
+        guard currentFolder != nil else { return }
+        errorMessage = Self.describe(error)
         Task { await stopRecording() }
-        state = .failed(Self.describe(error))
     }
+
+    // MARK: - Transcription
+
+    private func enqueueTranscription(of folder: URL) {
+        pendingTranscriptions.append(folder)
+        guard !isTranscribing else { return }
+        isTranscribing = true
+        Task { await runTranscriptions() }
+    }
+
+    private func runTranscriptions() async {
+        while !pendingTranscriptions.isEmpty {
+            let folder = pendingTranscriptions.removeFirst()
+            transcriptionPhase = .transcribing
+            do {
+                lastTranscriptURL = try await Transcriber.transcribe(folder: folder) { [weak self] phase in
+                    guard let self, self.isTranscribing else { return }
+                    self.transcriptionPhase = phase
+                }
+            } catch {
+                errorMessage = "Transcription failed: \(error.localizedDescription)"
+            }
+        }
+        transcriptionPhase = nil
+        isTranscribing = false
+    }
+
+    private static func describe(_ phase: Transcriber.Phase) -> String {
+        switch phase {
+        case .downloadingModel(let fraction):
+            fraction > 0 ? "Downloading model… \(Int(fraction * 100))%" : "Downloading model…"
+        case .transcribing:
+            "Transcribing…"
+        }
+    }
+
+    /// The most recently written transcript.md in any call folder.
+    private static func findLastTranscript() -> URL? {
+        let folders = (try? FileManager.default.contentsOfDirectory(at: recordingsFolder, includingPropertiesForKeys: nil)) ?? []
+        return folders
+            .map { $0.appending(path: Transcriber.transcriptName) }
+            .compactMap { url -> (url: URL, date: Date)? in
+                guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else { return nil }
+                return (url, date)
+            }
+            .max { $0.date < $1.date }?
+            .url
+    }
+
+    // MARK: - Helpers
 
     /// Creates ~/Documents/CallCaptures/<yyyy-MM-dd_HHmm>, adding a suffix if that minute is taken.
     private static func makeCallFolder() throws -> URL {

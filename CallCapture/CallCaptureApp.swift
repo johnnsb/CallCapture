@@ -25,6 +25,11 @@ struct CallCaptureApp: App {
 
             Divider()
 
+            Button("Open Last Transcript") {
+                recorder.openLastTranscript()
+            }
+            .disabled(recorder.lastTranscriptURL == nil)
+
             Button("Open Recordings Folder") {
                 recorder.openRecordingsFolder()
             }
@@ -33,7 +38,7 @@ struct CallCaptureApp: App {
 
             Button("Quit CallCapture") {
                 Task {
-                    await recorder.stopRecording()
+                    await recorder.stopRecording(transcribe: false)
                     NSApplication.shared.terminate(nil)
                 }
             }

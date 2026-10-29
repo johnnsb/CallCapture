@@ -6,6 +6,10 @@
 	objectVersion = 110;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		556BDCF130929C5D001A4D6B /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 556BDCF230929C5D001A4D6B /* WhisperKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		556BDCDC30929C5A001A4D6B /* CallCapture.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CallCapture.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -22,6 +26,7 @@
 		556BDCD930929C5A001A4D6B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				556BDCF130929C5D001A4D6B /* WhisperKit in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -60,6 +65,9 @@
 				556BDCDE30929C5A001A4D6B /* CallCapture */,
 			);
 			name = CallCapture;
+			packageProductDependencies = (
+				556BDCF230929C5D001A4D6B /* WhisperKit */,
+			);
 			productName = CallCapture;
 			productReference = 556BDCDC30929C5A001A4D6B /* CallCapture.app */;
 			productType = "com.apple.product-type.application";
@@ -88,6 +96,9 @@
 			);
 			mainGroup = 556BDCD330929C5A001A4D6B;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				556BDCF330929C5D001A4D6B /* XCRemoteSwiftPackageReference "WhisperKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 556BDCDD30929C5A001A4D6B /* Products */;
 			projectDirPath = "";
@@ -251,8 +262,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "CallCapture records your microphone during calls you choose to record, so your side of the conversation can be transcribed.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "CallCapture records your microphone during calls you choose to record, so your side of the conversation can be transcribed.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -286,8 +297,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "CallCapture records your microphone during calls you choose to record, so your side of the conversation can be transcribed.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "CallCapture records your microphone during calls you choose to record, so your side of the conversation can be transcribed.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -325,6 +336,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		556BDCF330929C5D001A4D6B /* XCRemoteSwiftPackageReference "WhisperKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/argmaxinc/WhisperKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.1.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		556BDCF230929C5D001A4D6B /* WhisperKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 556BDCF330929C5D001A4D6B /* XCRemoteSwiftPackageReference "WhisperKit" */;
+			productName = WhisperKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 556BDCD430929C5A001A4D6B /* Project object */;
 	validationLevel = 1;
